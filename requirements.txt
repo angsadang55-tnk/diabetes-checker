@@ -1,7 +1,8 @@
 streamlit
-numpy
+firebase-admin
+google-cloud-firestore
 pandas
-scikit-learn
+numpy
 joblib
 plotly
-firebase-admin
+requests

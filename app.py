@@ -1,25 +1,46 @@
+import firebase_admin
+from firebase_admin import credentials, firestore
 import streamlit as st
-import sys
 import joblib
 import numpy as np
 import pandas as pd
 from datetime import datetime
-import plotly.express as px  
+import plotly.express as px
+# --- 1. การเชื่อมต่อ Firebase ---
+def init_firebase():
+    if not firebase_admin._apps:
+        try:
+            cred_info = dict(st.secrets["firebase"])
+            cred = credentials.Certificate(cred_info)
+            firebase_admin.initialize_app(cred)
+            st.success("🔥 Firebase connected successfully")
+        except Exception as e:
+            st.error(f"❌ Firebase init failed: {e}")
+            st.stop()
+    return firestore.client()
 
-# ทำให้ลิงก์เปลี่ยนหน้าได้
+db = init_firebase()
+
 st.markdown("""
-<script>
-window.addEventListener("message", (event) => {
-    if (event.data.type === "setPage") {
-        window.parent.postMessage(
-            { type: "streamlit:setComponentValue", data: event.data.page },
-            "*"
-        );
-    }
-});
-</script>
+<style>
+/* ทำปุ่มล่างให้เหมือนลิงก์ */
+.link-btn button {
+    background: none !important;
+    border: none !important;
+    padding: 0 !important;
+    color: #ff4d4d !important;
+    font-size: 16px !important;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.link-btn button:hover {
+    color: #ff7b7b !important;
+}
+</style>
 """, unsafe_allow_html=True)
 
+# ทำให้ลิงก์เปลี่ยนหน้าได้
 st.markdown("""
 <style>
     .input-error input {
@@ -29,9 +50,16 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- 3. โหลดโมเดล ---
+@st.cache_resource
+def load_model():
+    # ตรวจสอบว่ามีไฟล์โมเดลจริงไหม
+    try:
+        return joblib.load("optimized_diabetes_model.pkl")
+    except:
+        return None
 
-# โหลดโมเดล
-model = joblib.load("optimized_diabetes_model.pkl")
+model = load_model()
 
 def logout_button():
     if st.sidebar.button("ออกจากระบบ"):
@@ -41,138 +69,65 @@ def logout_button():
         st.rerun()
 
 def save_result(result, user_input):
-    df = pd.DataFrame([{
-        'user': st.session_state['user'],
-        'datetime': datetime.now(),
-        'result': result,
+    db.collection("results").add({
+        "user": st.session_state["user"],
+        "datetime": datetime.now(),
+        "result": result,
         **user_input
-    }])
-    df.to_csv("results.csv", mode='a', index=False, header=not pd.io.common.file_exists("results.csv"))
+    })
+def auth_page():
+    from firebase_auth import firebase_login
 
-def load_users():
-    try:
-        return pd.read_csv("users.csv")
-    except FileNotFoundError:
-        df = pd.DataFrame(columns=["username", "password"])
-        df.to_csv("users.csv", index=False)
-        return df
+    if "auth_mode" not in st.session_state:
+        st.session_state.auth_mode = "login"
 
-def save_users(df):
-    df.to_csv("users.csv", index=False)
+    if st.session_state.auth_mode == "login":
+        st.subheader("🔐 เข้าสู่ระบบ")
 
-if "page" not in st.session_state:
-    st.session_state.page = "login"
-
-def login_or_register():
-    user_df = load_users()
-
-    if st.session_state.page == "login":
-        st.markdown("""
-            <div style="display:flex; justify-content:center; align-items:center; height:90vh;">
-                <div class="center-box">
-                    <div style="text-align:center;">
-                        <img src="https://cdn-icons-png.flaticon.com/512/2965/2965879.png" 
-                             width="90" style="margin-bottom:10px;">
-                        <h2>เข้าสู่ระบบ</h2>
-                    </div>
-        """, unsafe_allow_html=True)
-
-        username = st.text_input("ชื่อผู้ใช้")
-        password = st.text_input("รหัสผ่าน", type="password")
+        email = st.text_input("อีเมล", key="login_email")
+        password = st.text_input("รหัสผ่าน", type="password", key="login_pass")
 
         if st.button("เข้าสู่ระบบ"):
-            if ((user_df['username'] == username) & (user_df['password'] == password)).any():
-                st.session_state['logged_in'] = True
-                st.session_state['user'] = username
-                st.success("เข้าสู่ระบบสำเร็จ")
+            if not email or not password:
+                st.error("กรุณากรอกอีเมลและรหัสผ่าน")
+                return
+
+            result = firebase_login(email, password)
+
+            if "idToken" in result:
+                st.session_state.logged_in = True
+                st.session_state.user = email
                 st.rerun()
             else:
-                st.error("❌ ชื่อผู้ใช้หรือรหัสผ่านผิด")
+                st.error(result.get("error", {}).get("message", "เข้าสู่ระบบไม่สำเร็จ"))
 
-        # ลิงก์ไปหน้า Register (ไม่ใช่ปุ่ม)
-        st.markdown("""
-            <p style="text-align:center; margin-top:15px;">
-                ยังไม่มีบัญชี?
-                <a href='?page=register' style='color:#0059b3; font-weight:bold;'>
-                    สมัครสมาชิก
-                </a>
-            </p>
-        """, unsafe_allow_html=True)
+        if st.button("ยังไม่มีบัญชี? สมัครสมาชิก"):
+            st.session_state.auth_mode = "register"
+            st.rerun()
 
-        st.markdown("</div></div>", unsafe_allow_html=True)
+    else:
+        st.subheader("📝 สมัครสมาชิก")
 
-    elif st.session_state.page == "register":
-        register_page()
+        email = st.text_input("อีเมลใหม่", key="reg_email")
+        password = st.text_input("รหัสผ่านใหม่", type="password", key="reg_pass")
 
-def register_page():
-    user_df = load_users()
-
-    st.markdown("""
-        <div style="display:flex; justify-content:center; align-items:center; height:90vh;">
-            <div class="center-box">
-                <div style="text-align:center;">
-                    <img src="https://cdn-icons-png.flaticon.com/512/9131/9131529.png" 
-                        width="85" style="margin-bottom:10px;">
-                    <h2>สมัครสมาชิก</h2>
-                </div>
-    """, unsafe_allow_html=True)
-
-    new_username = st.text_input("ชื่อผู้ใช้ใหม่")
-    new_password = st.text_input("รหัสผ่านใหม่", type="password")
-    confirm = st.text_input("ยืนยันรหัสผ่าน", type="password")
-
-    if st.button("สมัครสมาชิก"):
-        ...
-    
-    st.markdown("""
-        <p style="text-align:center; margin-top:15px;">
-            มีบัญชีแล้ว?
-            <a href='?page=login' style='color:#0059b3; font-weight:bold;'>
-                กลับไปเข้าสู่ระบบ
-            </a>
-        </p>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-
-
-
-def profile_page():
-    st.title("โปรไฟล์ของฉัน")
-    user_df = load_users()
-    current_user = st.session_state['user']
-    user_data = user_df[user_df['username'] == current_user].iloc[0]
-
-    st.write(f"**ชื่อผู้ใช้ปัจจุบัน:** {current_user}")
-
-    with st.form(key='profile_form'):
-        new_username = st.text_input("เปลี่ยนชื่อผู้ใช้", value=current_user)
-        current_password = st.text_input("กรอกรหัสผ่านปัจจุบัน", type="password")
-        new_password = st.text_input("รหัสผ่านใหม่ (ถ้าต้องการเปลี่ยน)", type="password")
-        confirm_password = st.text_input("ยืนยันรหัสผ่านใหม่", type="password")
-        submit = st.form_submit_button("บันทึกการเปลี่ยนแปลง")
-
-    if submit:
-        if current_password != user_data['password']:
-            st.error("รหัสผ่านปัจจุบันไม่ถูกต้อง")
-            return
-        if new_username != current_user and new_username in user_df['username'].values:
-            st.error("ชื่อผู้ใช้นี้มีอยู่แล้ว กรุณาเลือกชื่ออื่น")
-            return
-        if new_password or confirm_password:
-            if new_password != confirm_password:
-                st.error("รหัสผ่านใหม่กับการยืนยันไม่ตรงกัน")
+        if st.button("สมัครสมาชิก"):
+            if not email or not password:
+                st.error("กรุณากรอกข้อมูลให้ครบ")
                 return
-            if new_password.strip() == "":
-                st.error("กรุณากรอกรหัสผ่านใหม่ให้ถูกต้อง")
-                return
-        idx = user_df.index[user_df['username'] == current_user][0]
-        user_df.at[idx, 'username'] = new_username
-        if new_password:
-            user_df.at[idx, 'password'] = new_password
-        save_users(user_df)
-        st.session_state['user'] = new_username
-        st.success("บันทึกข้อมูลโปรไฟล์เรียบร้อยแล้ว")
+
+            try:
+                from firebase_admin import auth
+                auth.create_user(email=email, password=password)
+                st.success("สมัครสมาชิกสำเร็จ! กรุณาเข้าสู่ระบบ")
+                st.session_state.auth_mode = "login"
+                st.rerun()
+            except Exception as e:
+                st.error(f"เกิดข้อผิดพลาด: {e}")
+
+        if st.button("มีบัญชีแล้ว? กลับเข้าสู่ระบบ"):
+            st.session_state.auth_mode = "login"
+            st.rerun()
 
 def diabetes_page():
     st.title("ระบบวินิจฉัยโรคเบาหวานด้วย Machine Learning")
@@ -214,7 +169,7 @@ def diabetes_page():
 
     # ตรวจว่ามีช่องไหนที่ยังไม่กรอก
         required_fields = [
-            pregnancies, glucose, blood_pressure, skin_thickness,
+            glucose, blood_pressure, skin_thickness,
             insulin, weight, height_cm, diabetes_pedigree, age
         ]
 
@@ -253,105 +208,128 @@ def history_page():
     st.title("📊 ผลการทำนายย้อนหลังและแนวโน้มสุขภาพ")
 
     try:
-        df = pd.read_csv("results.csv")
-        df['datetime'] = pd.to_datetime(df['datetime'])
-        df = df[df['user'] == st.session_state['user']]
+        docs = (
+            db.collection("results")
+            .where("user", "==", st.session_state["user"])
+            .order_by("datetime")
+            .stream()
+        )
 
-        if df.empty:
-            st.info("ยังไม่มีข้อมูลผลทำนายย้อนหลัง กรุณาไปที่เมนู 'วินิจฉัยโรคเบาหวาน' เพื่อทำการทำนายครั้งแรก")
+        data = []
+        for doc in docs:
+            d = doc.to_dict()
+
+            # ✅ ป้องกัน KeyError: datetime
+            if "datetime" not in d:
+                continue
+
+            # Firestore timestamp → python datetime
+            d["datetime"] = d["datetime"].replace(tzinfo=None)
+            data.append(d)
+
+        # ✅ ถ้าไม่มีข้อมูลเลย
+        if not data:
+            st.info("ยังไม่มีข้อมูลผลทำนายย้อนหลัง กรุณาไปที่เมนู 'วินิจฉัยโรคเบาหวาน'")
             return
+
+        df = pd.DataFrame(data)
+        df["datetime"] = pd.to_datetime(df["datetime"])
 
         # 1. การเลือกช่วงวันที่
         col1, col2 = st.columns(2)
         with col1:
-            start_date = st.date_input("วันที่เริ่มต้น", value=df['datetime'].min().date())
+            start_date = st.date_input(
+                "วันที่เริ่มต้น",
+                value=df["datetime"].min().date()
+            )
         with col2:
-            end_date = st.date_input("วันที่สิ้นสุด", value=df['datetime'].max().date())
+            end_date = st.date_input(
+                "วันที่สิ้นสุด",
+                value=df["datetime"].max().date()
+            )
 
         if start_date > end_date:
             st.error("วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด")
             return
 
-        mask = (df['datetime'].dt.date >= start_date) & (df['datetime'].dt.date <= end_date)
-        filtered_df = df.loc[mask].sort_values(by='datetime', ascending=True).reset_index(drop=True)
+        mask = (
+            (df["datetime"].dt.date >= start_date) &
+            (df["datetime"].dt.date <= end_date)
+        )
+        filtered_df = df.loc[mask].sort_values(
+            by="datetime", ascending=True
+        ).reset_index(drop=True)
 
         if filtered_df.empty:
             st.info("ไม่มีข้อมูลในช่วงวันที่ที่เลือก")
             return
-        
+
         st.markdown("---")
-        
-        # 2. กราฟเส้นแสดงแนวโน้ม (Glucose & BMI)
+
+        # 2. กราฟแนวโน้ม Glucose & BMI
         st.subheader("📈 แนวโน้มระดับน้ำตาลและค่า BMI ตามเวลา")
-        
-        chart_data = filtered_df[['datetime', 'glucose', 'bmi']].copy()
-        chart_data['date_only'] = chart_data['datetime'].dt.date
-        
-        # กราฟเส้นสำหรับ Glucose
+
+        chart_data = filtered_df[["datetime", "glucose", "bmi"]]
+
         fig_glucose = px.line(
-            chart_data, 
-            x='datetime', 
-            y='glucose', 
-            title='ระดับน้ำตาลในเลือด (Glucose) ย้อนหลัง',
-            labels={'datetime': 'วันที่/เวลา', 'glucose': 'ระดับน้ำตาล'},
+            chart_data,
+            x="datetime",
+            y="glucose",
+            title="ระดับน้ำตาลในเลือด (Glucose) ย้อนหลัง",
             markers=True
         )
-        fig_glucose.update_layout(xaxis_title="วันที่/เวลา", yaxis_title="ระดับน้ำตาลในเลือด (mg/dL)", hovermode="x unified")
-        fig_glucose.update_traces(line=dict(color='#4da3ff'), marker=dict(color='#1f82e8', size=8))
         st.plotly_chart(fig_glucose, use_container_width=True)
 
-        # กราฟเส้นสำหรับ BMI
         fig_bmi = px.line(
-            chart_data, 
-            x='datetime', 
-            y='bmi', 
-            title='ค่าดัชนีมวลกาย (BMI) ย้อนหลัง',
-            labels={'datetime': 'วันที่/เวลา', 'bmi': 'BMI'},
+            chart_data,
+            x="datetime",
+            y="bmi",
+            title="ค่าดัชนีมวลกาย (BMI) ย้อนหลัง",
             markers=True
         )
-        fig_bmi.update_layout(xaxis_title="วันที่/เวลา", yaxis_title="ค่า BMI", hovermode="x unified")
-        fig_bmi.update_traces(line=dict(color='#00bfa5'), marker=dict(color='#00897b', size=8))
         st.plotly_chart(fig_bmi, use_container_width=True)
-        
+
         st.markdown("---")
 
-        # 3. กราฟแท่งแสดงสัดส่วนผลทำนาย
+        # 3. กราฟแท่งผลทำนาย
         st.subheader("📊 สัดส่วนผลการทำนาย")
-        
-        result_counts = filtered_df['result'].value_counts().reset_index()
-        result_counts.columns = ['Result', 'Count']
-        
-        color_map = {'เสี่ยง': '#ff4d4d', 'ไม่เสี่ยง': '#4da3ff'}
-        
+
+        result_counts = filtered_df["result"].value_counts().reset_index()
+        result_counts.columns = ["Result", "Count"]
+
         fig_bar = px.bar(
-            result_counts, 
-            x='Result', 
-            y='Count', 
-            title='จำนวนผลทำนาย (เสี่ยง vs ไม่เสี่ยง)',
-            color='Result',
-            color_discrete_map=color_map,
-            text='Count'
+            result_counts,
+            x="Result",
+            y="Count",
+            title="จำนวนผลทำนาย (เสี่ยง vs ไม่เสี่ยง)",
+            text="Count"
         )
-        fig_bar.update_layout(xaxis_title="ผลการทำนาย", yaxis_title="จำนวนครั้ง")
         st.plotly_chart(fig_bar, use_container_width=True)
-        
+
+
         st.markdown("---")
 
-        # 4. แสดงตารางข้อมูลดิบ
+        # 4. ตารางข้อมูลดิบ
         st.subheader("📄 ตารางข้อมูลดิบ")
-        display_df = filtered_df[['datetime', 'result', 'glucose', 'blood_pressure', 'bmi', 'age']]
-        display_df.columns = ['วันที่/เวลา', 'ผลทำนาย', 'น้ำตาลในเลือด', 'ความดันโลหิต', 'BMI', 'อายุ']
-        
+
+        display_df = filtered_df[
+            ["datetime", "result", "glucose", "blood_pressure", "bmi", "age"]
+        ].rename(columns={
+            "datetime": "วันที่/เวลา",
+            "result": "ผลทำนาย",
+            "glucose": "น้ำตาลในเลือด",
+            "blood_pressure": "ความดันโลหิต",
+            "bmi": "BMI",
+            "age": "อายุ"
+        })
+
         st.dataframe(
-            display_df.sort_values(by='วันที่/เวลา', ascending=False),
-            column_config={
-                "วันที่/เวลา": st.column_config.DatetimeColumn("วันที่/เวลา", format="YYYY-MM-DD HH:mm"),
-            },
+            display_df.sort_values(by="วันที่/เวลา", ascending=False),
             use_container_width=True
         )
 
-    except FileNotFoundError:
-        st.warning("ยังไม่มีข้อมูลผลทำนายย้อนหลัง")
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาด: {e}")
 
 def about_page():
     st.header("📘 เกี่ยวกับโรคเบาหวาน")
@@ -425,20 +403,15 @@ if "logged_in" not in st.session_state:
 
 if "page" not in st.session_state:
     st.session_state.page = "login"
-    
-# ดึงค่าจากลิงก์ เช่น ?page=register
-query_params = st.query_params
-if "page" in query_params:
-    st.session_state.page = query_params["page"]
 
 if not st.session_state['logged_in']:
-    login_or_register()
+    auth_page()
     st.stop()
 
 # แสดงปุ่มออกจากระบบทุกหน้า
 logout_button()
 
-page = st.sidebar.selectbox("เมนู", ["วินิจฉัยโรคเบาหวาน", "ผลย้อนหลัง", "เกี่ยวกับโรคเบาหวาน", "โปรไฟล์ผู้ใช้"])
+page = st.sidebar.selectbox("เมนู", ["วินิจฉัยโรคเบาหวาน", "ผลย้อนหลัง", "เกี่ยวกับโรคเบาหวาน"])
 
 if page == "วินิจฉัยโรคเบาหวาน":
     diabetes_page()
@@ -446,6 +419,4 @@ elif page == "ผลย้อนหลัง":
     history_page()
 elif page == "เกี่ยวกับโรคเบาหวาน":
     about_page()
-elif page == "โปรไฟล์ผู้ใช้":
-    profile_page()
 

@@ -53,13 +53,19 @@ st.markdown("""
 # --- 3. โหลดโมเดล ---
 @st.cache_resource
 def load_model():
-    # ตรวจสอบว่ามีไฟล์โมเดลจริงไหม
     try:
-        return joblib.load("optimized_diabetes_model.pkl")
-    except:
+        model = joblib.load("optimized_diabetes_model.pkl")
+        st.success("✅ Model loaded successfully")
+        return model
+    except Exception as e:
+        st.error(f"❌ Failed to load model: {e}")
         return None
 
 model = load_model()
+# กันกรณีโมเดลโหลดไม่ขึ้น (สำคัญมากบน Streamlit Cloud)
+if model is None:
+    st.error("❌ ไม่พบโมเดลสำหรับทำนายผล กรุณาตรวจสอบไฟล์ optimized_diabetes_model.pkl")
+    st.stop()
 
 def logout_button():
     if st.sidebar.button("ออกจากระบบ"):

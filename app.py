@@ -6,6 +6,14 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 import plotly.express as px
+
+# ===== Session State Init (ต้องอยู่บนสุดก่อนใช้งาน) =====
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if "user" not in st.session_state:
+    st.session_state.user = None
+
 # --- 1. การเชื่อมต่อ Firebase ---
 def init_firebase():
     if not firebase_admin._apps:
@@ -13,13 +21,27 @@ def init_firebase():
             cred_info = dict(st.secrets["firebase"])
             cred = credentials.Certificate(cred_info)
             firebase_admin.initialize_app(cred)
-            st.success("🔥 Firebase connected successfully")
         except Exception as e:
             st.error(f"❌ Firebase init failed: {e}")
             st.stop()
     return firestore.client()
 
 db = init_firebase()
+
+def get_current_user_profile():
+    user_email = st.session_state.get("user")
+    if not user_email:
+        return {}
+
+    doc = db.collection("users").document(user_email).get()
+    if doc.exists:
+        return doc.to_dict()
+
+    return {
+        "email": user_email,
+        "name": "ยังไม่ระบุชื่อ",
+        "role": "user"
+    }
 
 st.markdown("""
 <style>
@@ -69,13 +91,35 @@ def logout_button():
         # แทนที่ st.experimental_rerun() ด้วยการรีโหลดโดยใช้ sys.exit()
         st.rerun()
 
-def save_result(result, user_input):
+from datetime import datetime
+
+def save_result(result_text, user_input):
+
     db.collection("results").add({
-        "user": st.session_state["user"],
-        "datetime": datetime.now(),
-        "result": result,
-        **user_input
+        # 🔐 ข้อมูลผู้ใช้
+        "user": st.session_state.get("user"),          # email
+        "name": user_profile.get("name", ""),          # ชื่อจริง
+        "role": user_profile.get("role", "user"),
+
+        # 📊 ผลการทำนาย
+        "result": result_text,
+
+        # 🩺 ข้อมูลสุขภาพ
+        "pregnancies": user_input["pregnancies"],
+        "glucose": user_input["glucose"],
+        "blood_pressure": user_input["blood_pressure"],
+        "skin_thickness": user_input["skin_thickness"],
+        "insulin": user_input["insulin"],
+        "weight": user_input["weight"],
+        "height_cm": user_input["height_cm"],
+        "bmi": user_input["bmi"],
+        "diabetes_pedigree": user_input["diabetes_pedigree"],
+        "age": user_input["age"],
+
+        # ⏰ เวลา
+        "datetime": datetime.now()
     })
+
 def auth_page():
     from firebase_auth import firebase_login
 
@@ -85,46 +129,56 @@ def auth_page():
     if st.session_state.auth_mode == "login":
         st.subheader("🔐 เข้าสู่ระบบ")
 
-        email = st.text_input("อีเมล", key="login_email")
-        password = st.text_input("รหัสผ่าน", type="password", key="login_pass")
+        # 🟢 ใช้ st.form เพื่อให้กด Enter ได้
+        with st.form(key="login_form"):
+            email = st.text_input("อีเมล", key="login_email")
+            password = st.text_input("รหัสผ่าน", type="password", key="login_pass")
+            submit_login = st.form_submit_button("เข้าสู่ระบบ", use_container_width=True)
 
-        if st.button("เข้าสู่ระบบ"):
-            if not email or not password:
-                st.error("กรุณากรอกอีเมลและรหัสผ่าน")
-                return
+            if submit_login:
+                if not email or not password:
+                    st.error("กรุณากรอกอีเมลและรหัสผ่าน")
+                else:
+                    result = firebase_login(email, password)
+                    if "idToken" in result:
+                        st.session_state.logged_in = True
+                        st.session_state.user = email
+                        st.rerun()
+                    else:
+                        st.error(result.get("error", {}).get("message", "เข้าสู่ระบบไม่สำเร็จ"))
 
-            result = firebase_login(email, password)
-
-            if "idToken" in result:
-                st.session_state.logged_in = True
-                st.session_state.user = email
-                st.rerun()
-            else:
-                st.error(result.get("error", {}).get("message", "เข้าสู่ระบบไม่สำเร็จ"))
-
+        # ปุ่มสลับโหมดอยู่นอกฟอร์ม
         if st.button("ยังไม่มีบัญชี? สมัครสมาชิก"):
             st.session_state.auth_mode = "register"
             st.rerun()
 
     else:
         st.subheader("📝 สมัครสมาชิก")
+        
+        # 🟢 ใช้ st.form สำหรับสมัครสมาชิกเช่นกัน
+        with st.form(key="reg_form"):
+            email = st.text_input("อีเมลใหม่", key="reg_email")
+            password = st.text_input("รหัสผ่านใหม่", type="password", key="reg_pass")
+            submit_reg = st.form_submit_button("สมัครสมาชิก", use_container_width=True)
 
-        email = st.text_input("อีเมลใหม่", key="reg_email")
-        password = st.text_input("รหัสผ่านใหม่", type="password", key="reg_pass")
-
-        if st.button("สมัครสมาชิก"):
-            if not email or not password:
-                st.error("กรุณากรอกข้อมูลให้ครบ")
-                return
-
-            try:
-                from firebase_admin import auth
-                auth.create_user(email=email, password=password)
-                st.success("สมัครสมาชิกสำเร็จ! กรุณาเข้าสู่ระบบ")
-                st.session_state.auth_mode = "login"
-                st.rerun()
-            except Exception as e:
-                st.error(f"เกิดข้อผิดพลาด: {e}")
+            if submit_reg:
+                if not email or not password:
+                    st.error("กรุณากรอกข้อมูลให้ครบ")
+                else:
+                    from firebase_admin import auth
+                    try:
+                        auth.create_user(email=email, password=password)
+                        db.collection("users").document(email).set({
+                            "email": email,
+                            "name": "",
+                            "role": "user",
+                            "created_at": datetime.now()
+                        })
+                        st.success("สมัครสมาชิกสำเร็จ! กรุณาเข้าสู่ระบบ")
+                        st.session_state.auth_mode = "login"
+                        # ไม่ต้องรีรันทันทีเพื่อให้ยูสเซอร์เห็น success message แป๊บนึง หรือจะรีรันเลยก็ได้
+                    except Exception as e:
+                        st.error(f"เกิดข้อผิดพลาด: {e}")
 
         if st.button("มีบัญชีแล้ว? กลับเข้าสู่ระบบ"):
             st.session_state.auth_mode = "login"
@@ -338,6 +392,235 @@ def history_page():
 
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาด: {e}")
+        
+def profile_page():
+    st.subheader("👤 โปรไฟล์ผู้ใช้งาน")
+
+    email = st.session_state.get("user")
+    user_ref = db.collection("users").document(email)
+
+    doc = user_ref.get()
+    if doc.exists:
+        user_data = doc.to_dict()
+    else:
+        user_data = {
+            "email": email,
+            "name": "",
+            "age": 25,
+            "gender": "หญิง",
+            "role": "user"
+        }
+        user_ref.set(user_data)
+
+    name = st.text_input("ชื่อ-นามสกุล", user_data.get("name", ""))
+    age = st.number_input("อายุ", 1, 120, user_data.get("age", 25))
+    gender = st.selectbox(
+        "เพศ",
+        ["หญิง", "ชาย", "อื่นๆ"],
+        index=["หญิง", "ชาย", "อื่นๆ"].index(user_data.get("gender", "หญิง"))
+    )
+
+    if st.button("💾 บันทึกข้อมูล"):
+        user_ref.update({
+            "name": name,
+            "age": age,
+            "gender": gender
+        })
+        st.success("✅ บันทึกข้อมูลเรียบร้อย")
+        
+def delete_user(email):
+    auth.delete_user(auth.get_user_by_email(email).uid)
+    db.collection("users").document(email).delete()
+
+def admin_page():
+
+    from firebase_admin import auth
+
+    if user_profile.get("role") != "admin":
+        st.error("⛔ คุณไม่มีสิทธิ์เข้าถึงหน้านี้")
+        st.stop()
+
+    st.subheader("🛠 ระบบจัดการผู้ใช้")
+
+    users_ref = db.collection("users").stream()
+    users = []
+
+    for u in users_ref:
+        d = u.to_dict()
+        users.append(d)
+
+    df = pd.DataFrame(users)
+    st.subheader("👥 รายชื่อผู้ใช้")
+
+    for _, row in df.iterrows():
+        col1, col2, col3 = st.columns([4,3,1])
+        col1.write(row["name"])
+        col2.write(row["email"])
+
+        if row["role"] != "admin":
+            if col3.button("🗑 ลบ", key=row["email"]):
+                delete_user(row["email"])
+                st.success("ลบผู้ใช้แล้ว")
+                st.rerun()
+
+    st.markdown("---")
+    st.subheader("เปลี่ยนสิทธิ์ผู้ใช้")
+
+    email = st.selectbox(
+        "เลือกอีเมลผู้ใช้",
+        df["email"].tolist()
+    )
+
+    current_role = df[df["email"] == email]["role"].values[0]
+    new_role = st.selectbox(
+        "สิทธิ์ใหม่",
+        ["user", "admin"],
+        index=0 if current_role == "user" else 1
+    )
+
+    if st.button("บันทึกสิทธิ์"):
+        db.collection("users").document(email).update({
+            "role": new_role
+        })
+        st.success(f"✅ เปลี่ยนสิทธิ์ {email} เป็น {new_role} แล้ว")
+        st.rerun()
+
+def admin_results_page():
+    if user_profile.get("role") != "admin":
+        st.error("⛔ ไม่มีสิทธิ์")
+        st.stop()
+
+    st.subheader("📊 ผลทำนายของผู้ใช้ทั้งหมด")
+    
+    records = db.collection("results").stream()
+    data = [r.to_dict() for r in records]
+
+    if not data:
+        st.info("ยังไม่มีข้อมูล")
+        return
+
+    df = pd.DataFrame(data)
+
+    # 🔹 โหลด users
+    users_docs = db.collection("users").stream()
+    users_map = {
+        u.to_dict().get("email"): u.to_dict().get("name", "")
+        for u in users_docs
+    }
+
+    df["name"] = df["user"].map(users_map)
+    # 🔹 ย้าย name ไปเป็นคอลัมน์แรก
+    cols_order = [
+        "name", "user", "result", "datetime",
+        "bmi", "glucose", "insulin", "blood_pressure",
+        "weight", "height_cm", "age"
+    ]
+    df = df[[c for c in cols_order if c in df.columns]]
+
+    df["datetime"] = pd.to_datetime(df["datetime"])
+
+    # ✅ กันข้อมูลเก่าที่ไม่มี field
+    if "name" not in df.columns:
+        df["name"] = ""
+
+    if "user" not in df.columns:
+        df["user"] = ""
+
+    if "datetime" in df.columns:
+        df["datetime"] = pd.to_datetime(df["datetime"])
+
+    # ----------------------------
+    st.subheader("🔍 ค้นหาข้อมูลผู้ใช้")
+    keyword = st.text_input("ค้นหาชื่อหรืออีเมล")
+
+    if keyword:
+        df = df[
+            df["name"].str.contains(keyword, case=False, na=False) |
+            df["user"].str.contains(keyword, case=False, na=False)
+        ]
+
+    #st.dataframe(
+    #    df.sort_values("datetime", ascending=False),
+     #   use_container_width=True
+    #)
+
+    # 🔒 บังคับโครงสร้างคอลัมน์ให้ตรง
+    columns_order = [
+        "name",
+        "user",
+        "result",
+        "datetime",
+        "bmi",
+        "glucose",
+        "insulin",
+        "blood_pressure",
+        "weight",
+        "height_cm",
+        "age"
+    ]
+
+    # เติมคอลัมน์ที่ขาด (กัน KeyError)
+    for col in columns_order:
+        if col not in df.columns:
+            df[col] = ""
+
+    df = df[columns_order]
+
+    st.dataframe(df, use_container_width=True)
+
+    st.download_button(
+        "📥 ดาวน์โหลดผลทำนายทั้งหมด (CSV)",
+        df.to_csv(index=False).encode("utf-8-sig"),
+        file_name="all_results_clean.csv",
+        mime="text/csv"
+    )
+
+    # ----------------------------
+    # st.subheader("👤 ดูผลเฉพาะรายบุคคล")
+
+    # users = sorted(df["user"].dropna().unique())
+
+    # if not users:
+    #     st.info("ยังไม่มีข้อมูลผู้ใช้")
+    #     return
+
+    # selected_user = st.selectbox("เลือกผู้ใช้", users)
+
+    # user_df = df[df["user"] == selected_user]
+
+    # st.dataframe(
+    #     user_df.sort_values("datetime", ascending=False),
+    #     use_container_width=True
+    # )
+# ----------------------------
+
+def dashboard_page():
+    if user_profile.get("role") != "admin":
+        st.error("⛔ ไม่มีสิทธิ์")
+        st.stop()
+
+    st.subheader("📊 Dashboard ภาพรวมระบบ")
+
+    users = list(db.collection("users").stream())
+    results = list(db.collection("results").stream())
+
+    users_df = pd.DataFrame([u.to_dict() for u in users])
+    results_df = pd.DataFrame([r.to_dict() for r in results])
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("👥 ผู้ใช้ทั้งหมด", len(users_df))
+    col2.metric("🧪 การทำนายทั้งหมด", len(results_df))
+    col3.metric(
+        "⚠ ผู้ที่เสี่ยง",
+        (results_df["result"] == "เสี่ยง").sum()
+    )
+
+    if not results_df.empty:
+        results_df["datetime"] = pd.to_datetime(results_df["datetime"])
+        st.line_chart(
+            results_df.groupby(results_df["datetime"].dt.date)["glucose"].mean()
+        )
+
 
 def about_page():
     st.header("📘 เกี่ยวกับโรคเบาหวาน")
@@ -406,25 +689,82 @@ def about_page():
     """)
 
 # เริ่มต้นแอป
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-
-if "page" not in st.session_state:
-    st.session_state.page = "login"
-
+# 🔐 เช็ก login
 if not st.session_state['logged_in']:
     auth_page()
     st.stop()
 
-# แสดงปุ่มออกจากระบบทุกหน้า
-logout_button()
+# ✅ ดึงข้อมูลผู้ใช้
+# ✅ ดึงข้อมูลผู้ใช้
+user_profile = get_current_user_profile()
 
-page = st.sidebar.selectbox("เมนู", ["วินิจฉัยโรคเบาหวาน", "ผลย้อนหลัง", "เกี่ยวกับโรคเบาหวาน"])
+with st.sidebar:
+    # 1. แสดงข้อมูลโปรไฟล์ (โชว์ทุกคน)
+    st.markdown(f"""
+    <div style="
+        background:#f0f6ff;
+        padding:12px;
+        border-radius:10px;
+        margin-bottom:10px;
+    ">
+    👤 <span style="color:#000;"><b>{user_profile.get("name","ยังไม่ระบุชื่อ")}</b></span><br>
+    <span style="color:#555;"><small>{st.session_state.get("user","")}</small></span><br>
+    <span style="color:#555;">สิทธิ์: {user_profile.get("role","user")}</span>
+    </div>
+    """, unsafe_allow_html=True)
 
+    # 2. วางปุ่มออกจากระบบตรงนี้ (ย้ายออกมาข้างนอกเพื่อให้โชว์ทุกคน)
+    logout_button() 
+    
+    #st.markdown("---") # เส้นคั่นเพื่อความสวยงาม
+
+    # 3. แสดงสถานะเพิ่มเติม
+    if user_profile and not user_profile.get("name"):
+        st.warning("⚠ กรุณากรอกข้อมูลส่วนตัวให้ครบ")
+        
+    if user_profile and user_profile.get("role") == "admin":
+        st.success("🛠️ ผู้ดูแลระบบ")
+
+# --- หลังจากนี้คือส่วนของเมนู (อยู่นอก sidebar block หรือใช้ st.sidebar ก็ได้) ---
+# 2. กำหนดรายการเมนูตามสิทธิ์
+if user_profile.get("role") == "admin":
+    # ลำดับเมนูสำหรับแอดมินตามที่คุณต้องการ
+    menu = [
+        "ผลทำนายทั้งหมด",
+        "ระบบแอดมิน",
+        "Dashboard",
+        "โปรไฟล์ของฉัน"
+    ]
+else:
+    # ลำดับเมนูสำหรับผู้ใช้ทั่วไป
+    menu = [
+        "วินิจฉัยโรคเบาหวาน",
+        "ผลย้อนหลัง",
+        "เกี่ยวกับโรคเบาหวาน",
+        "โปรไฟล์ของฉัน"
+    ]
+
+page = st.sidebar.selectbox("เมนูหลัก", menu)
 if page == "วินิจฉัยโรคเบาหวาน":
     diabetes_page()
+
 elif page == "ผลย้อนหลัง":
     history_page()
+
+elif page == "โปรไฟล์ของฉัน":
+    profile_page()
+
 elif page == "เกี่ยวกับโรคเบาหวาน":
     about_page()
+
+elif page == "Dashboard":
+    dashboard_page()
+
+elif page == "ระบบแอดมิน":
+    admin_page()
+
+elif page == "ผลทำนายทั้งหมด":
+    admin_results_page()
+
+
 

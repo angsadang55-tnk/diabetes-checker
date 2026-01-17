@@ -1,5 +1,5 @@
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, firestore, auth
 import streamlit as st
 import joblib
 import numpy as np
@@ -429,63 +429,108 @@ def profile_page():
         })
         st.success("✅ บันทึกข้อมูลเรียบร้อย")
         
+# แก้ไขฟังก์ชัน delete_user
 def delete_user(email):
-    auth.delete_user(auth.get_user_by_email(email).uid)
-    db.collection("users").document(email).delete()
+    try:
+        # เรียกใช้ auth ได้เลยเพราะ import ไว้ข้างบนแล้ว
+        user = auth.get_user_by_email(email)
+        auth.delete_user(user.uid)
+        db.collection("users").document(email).delete()
+        return True
+    except Exception as e:
+        st.error(f"ไม่สามารถลบผู้ใช้ได้: {e}")
+        return False
 
 def admin_page():
-
-    from firebase_admin import auth
-
     if user_profile.get("role") != "admin":
         st.error("⛔ คุณไม่มีสิทธิ์เข้าถึงหน้านี้")
         st.stop()
 
     st.subheader("🛠 ระบบจัดการผู้ใช้")
 
+    # 1. ดึงข้อมูลจาก Collection users
     users_ref = db.collection("users").stream()
-    users = []
+    users_data = {u.id: u.to_dict() for u in users_ref}
 
-    for u in users_ref:
-        d = u.to_dict()
-        users.append(d)
+    # 2. ดึงอีเมลทั้งหมดที่เคยมาทำนายผลจาก Collection results (เพื่อหาคนที่ตกหล่น)
+    results_ref = db.collection("results").stream()
+    all_emails_from_results = set()
+    for r in results_ref:
+        email = r.to_dict().get("user")
+        if email:
+            all_emails_from_results.add(email)
 
-    df = pd.DataFrame(users)
-    st.subheader("👥 รายชื่อผู้ใช้")
+    # 3. รวมรายชื่อเข้าด้วยกัน
+    combined_emails = set(users_data.keys()).union(all_emails_from_results)
+    
+    final_users = []
+    for email in combined_emails:
+        user_info = users_data.get(email, {})
+        final_users.append({
+            "email": email,
+            "name": user_info.get("name", "ผู้ใช้ใหม่ (ไม่มีข้อมูลโปรไฟล์)"),
+            "role": user_info.get("role", "user")
+        })
 
+    df = pd.DataFrame(final_users)
+    st.subheader(f"👥 รายชื่อผู้ใช้ทั้งหมด ({len(df)} คน)")
+
+    # แสดงรายชื่อพร้อมปุ่มลบ
     for _, row in df.iterrows():
-        col1, col2, col3 = st.columns([4,3,1])
-        col1.write(row["name"])
+        col1, col2, col3 = st.columns([3, 3, 1])
+        col1.write(f"**{row['name']}**")
         col2.write(row["email"])
 
-        if row["role"] != "admin":
-            if col3.button("🗑 ลบ", key=row["email"]):
+        # แอดมินลบตัวเองไม่ได้ และป้องกันการลบแอดมินคนอื่น (ถ้าต้องการ)
+        if row["email"] != st.session_state.get("user") and row["role"] != "admin":
+            if col3.button("🗑 ลบ", key=f"del_{row['email']}"):
                 delete_user(row["email"])
-                st.success("ลบผู้ใช้แล้ว")
+                st.success(f"ลบ {row['email']} เรียบร้อย")
                 st.rerun()
 
     st.markdown("---")
-    st.subheader("เปลี่ยนสิทธิ์ผู้ใช้")
+    st.subheader("🔄 เปลี่ยนสิทธิ์ผู้ใช้")
 
-    email = st.selectbox(
-        "เลือกอีเมลผู้ใช้",
-        df["email"].tolist()
+    # สร้างรายชื่อสำหรับแสดงผลในตัวเลือก (เช่น "ชื่อ - email@example.com")
+    search_options = [f"{u['name']} ({u['email']})" for u in final_users]
+    
+    # ใช้ selectbox ซึ่ง Streamlit รองรับการพิมพ์ค้นหาในตัวอยู่แล้ว
+    selected_display = st.selectbox(
+        "ค้นหาชื่อหรืออีเมลที่ต้องการเปลี่ยนสิทธิ์",
+        options=search_options,
+        index=None,
+        placeholder="พิมพ์เพื่อค้นหาชื่อหรืออีเมล..."
     )
 
-    current_role = df[df["email"] == email]["role"].values[0]
-    new_role = st.selectbox(
-        "สิทธิ์ใหม่",
-        ["user", "admin"],
-        index=0 if current_role == "user" else 1
-    )
-
-    if st.button("บันทึกสิทธิ์"):
-        db.collection("users").document(email).update({
-            "role": new_role
-        })
-        st.success(f"✅ เปลี่ยนสิทธิ์ {email} เป็น {new_role} แล้ว")
-        st.rerun()
-
+    if selected_display:
+        # ดึง email ออกมาจากข้อความที่เลือก (ค่าในวงเล็บสุดท้าย)
+        target_email = selected_display.split("(")[-1].replace(")", "")
+        
+        # ค้นหาข้อมูลผู้ใช้ที่เลือก
+        user_to_update = next((u for u in final_users if u["email"] == target_email), None)
+        
+        if user_to_update:
+            current_role = user_to_update["role"]
+            
+            col_role, col_btn = st.columns([3, 1])
+            with col_role:
+                new_role = st.selectbox(
+                    f"กำหนดสิทธิ์ใหม่สำหรับ {target_email}",
+                    ["user", "admin"],
+                    index=0 if current_role == "user" else 1
+                )
+            
+            with col_btn:
+                st.write("") # เว้นระยะให้ตรงกับปุ่ม
+                st.write("") 
+                if st.button("บันทึกสิทธิ์", use_container_width=True):
+                    db.collection("users").document(target_email).set({
+                        "email": target_email,
+                        "role": new_role,
+                        "name": user_to_update['name'] if user_to_update['name'] != "ผู้ใช้ใหม่ (ไม่มีข้อมูลโปรไฟล์)" else ""
+                    }, merge=True)
+                    st.success(f"✅ เปลี่ยนสิทธิ์ {target_email} เป็น {new_role} แล้ว")
+                    st.rerun()
 def admin_results_page():
     if user_profile.get("role") != "admin":
         st.error("⛔ ไม่มีสิทธิ์")

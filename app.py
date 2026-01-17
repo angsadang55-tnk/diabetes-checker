@@ -129,56 +129,57 @@ def auth_page():
     if st.session_state.auth_mode == "login":
         st.subheader("🔐 เข้าสู่ระบบ")
 
-        # 🟢 ใช้ st.form เพื่อให้กด Enter ได้
-        with st.form(key="login_form"):
-            email = st.text_input("อีเมล", key="login_email")
-            password = st.text_input("รหัสผ่าน", type="password", key="login_pass")
-            submit_login = st.form_submit_button("เข้าสู่ระบบ", use_container_width=True)
+        email = st.text_input("อีเมล", key="login_email")
+        password = st.text_input("รหัสผ่าน", type="password", key="login_pass")
 
-            if submit_login:
-                if not email or not password:
-                    st.error("กรุณากรอกอีเมลและรหัสผ่าน")
-                else:
-                    result = firebase_login(email, password)
-                    if "idToken" in result:
-                        st.session_state.logged_in = True
-                        st.session_state.user = email
-                        st.rerun()
-                    else:
-                        st.error(result.get("error", {}).get("message", "เข้าสู่ระบบไม่สำเร็จ"))
+        if st.button("เข้าสู่ระบบ"):
+            if not email or not password:
+                st.error("กรุณากรอกอีเมลและรหัสผ่าน")
+                return
 
-        # ปุ่มสลับโหมดอยู่นอกฟอร์ม
+            result = firebase_login(email, password)
+
+            if "idToken" in result:
+                st.session_state.logged_in = True
+                st.session_state.user = email
+                st.rerun()
+            else:
+                st.error(result.get("error", {}).get("message", "เข้าสู่ระบบไม่สำเร็จ"))
+
         if st.button("ยังไม่มีบัญชี? สมัครสมาชิก"):
             st.session_state.auth_mode = "register"
             st.rerun()
 
     else:
         st.subheader("📝 สมัครสมาชิก")
-        
-        # 🟢 ใช้ st.form สำหรับสมัครสมาชิกเช่นกัน
-        with st.form(key="reg_form"):
-            email = st.text_input("อีเมลใหม่", key="reg_email")
-            password = st.text_input("รหัสผ่านใหม่", type="password", key="reg_pass")
-            submit_reg = st.form_submit_button("สมัครสมาชิก", use_container_width=True)
 
-            if submit_reg:
-                if not email or not password:
-                    st.error("กรุณากรอกข้อมูลให้ครบ")
-                else:
-                    from firebase_admin import auth
-                    try:
-                        auth.create_user(email=email, password=password)
-                        db.collection("users").document(email).set({
-                            "email": email,
-                            "name": "",
-                            "role": "user",
-                            "created_at": datetime.now()
-                        })
-                        st.success("สมัครสมาชิกสำเร็จ! กรุณาเข้าสู่ระบบ")
-                        st.session_state.auth_mode = "login"
-                        # ไม่ต้องรีรันทันทีเพื่อให้ยูสเซอร์เห็น success message แป๊บนึง หรือจะรีรันเลยก็ได้
-                    except Exception as e:
-                        st.error(f"เกิดข้อผิดพลาด: {e}")
+        email = st.text_input("อีเมลใหม่", key="reg_email")
+        password = st.text_input("รหัสผ่านใหม่", type="password", key="reg_pass")
+
+        if st.button("สมัครสมาชิก"):
+            if not email or not password:
+                st.error("กรุณากรอกข้อมูลให้ครบ")
+                return
+
+        from firebase_admin import auth   # ← ต้องอยู่นอก try
+
+        try:
+            auth.create_user(email=email, password=password)
+
+            db.collection("users").document(email).set({
+                "email": email,
+                "name": "",
+                "role": "user",
+                "created_at": datetime.now()
+            })
+
+            st.success("สมัครสมาชิกสำเร็จ! กรุณาเข้าสู่ระบบ")
+            st.session_state.auth_mode = "login"
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"เกิดข้อผิดพลาด: {e}")
+                    
 
         if st.button("มีบัญชีแล้ว? กลับเข้าสู่ระบบ"):
             st.session_state.auth_mode = "login"
@@ -694,7 +695,6 @@ if not st.session_state['logged_in']:
     auth_page()
     st.stop()
 
-# ✅ ดึงข้อมูลผู้ใช้
 # ✅ ดึงข้อมูลผู้ใช้
 user_profile = get_current_user_profile()
 

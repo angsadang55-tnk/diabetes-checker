@@ -305,7 +305,7 @@ def auth_page():
             st.markdown("<p style='text-align: center; color: #888; margin-top: 15px;'>มีบัญชีอยู่แล้ว?</p>", unsafe_allow_html=True)
             if st.button("กลับไปหน้าเข้าสู่ระบบ", use_container_width=True):
                 st.session_state.auth_mode = "login"
-                st.rerun() 
+                st.rerun()
 #11. หน้า “วินิจฉัยและประเมินความเสี่ยง”
 def diabetes_page():
     render_styled_header("🩺 วินิจฉัยและประเมินความเสี่ยง", "วิเคราะห์สุขภาพด้วยระบบ AI จากพฤติกรรมและผลแล็บ")
@@ -1039,7 +1039,7 @@ def about_page():
         """)
     with col2:
         # ใส่รูปภาพประกอบ (สามารถเปลี่ยน URL เป็นรูปที่คุณชอบได้)
-        st.image("https://static.bangkokhospital.com/uploads/2024/07/%E0%B8%A0%E0%B8%B2%E0%B8%9E%E0%B8%9B%E0%B8%A3%E0%B8%B0%E0%B8%81%E0%B8%AD%E0%B8%9A-BGH_%E0%B8%A0%E0%B8%B2%E0%B8%A7%E0%B8%B0%E0%B8%81%E0%B9%88%E0%B8%AD%E0%B8%99%E0%B9%80%E0%B8%9A%E0%B8%B2%E0%B8%AB%E0%B8%A7%E0%B8%B2%E0%B8%99_shutterstock_1011634711.jpg", caption="จาก www.static.bangkokhospital.com")
+        st.image("https://static.bangkokhospital.com/uploads/2024/07/%E0%B8%A0%E0%B8%B2%E0%B8%9E%E0%B8%9B%E0%B8%A3%E0%B8%B0%E0%B8%81%E0%B8%AD%E0%B8%9A-BGH_%E0%B8%A0%E0%B8%B2%E0%B8%A7%E0%B8%B0%E0%B8%81%E0%B9%88%E0%B8%AD%E0%B8%99%E0%B9%80%E0%B8%9A%E0%B8%B2%E0%B8%AB%E0%B8%A7%E0%B8%B2%E0%B8%99_shutterstock_1011634711.jpg", caption="จาก www.static.bangkokhospital.com",width=350)
     
     st.markdown("""
     <div>
@@ -1057,7 +1057,7 @@ def about_page():
         """)
     with col2:
         # ใส่รูปภาพประกอบ (สามารถเปลี่ยน URL เป็นรูปที่คุณชอบได้)
-        st.image("https://www.nakornthon.com/Upload/Images/Content/638790179276148521/Image_Cover_Insulin.jpg", caption="จาก www.nakornthon.com")
+        st.image("https://www.nakornthon.com/Upload/Images/Content/638790179276148521/Image_Cover_Insulin.jpg", caption="จาก www.nakornthon.com",width=350)
     
     st.markdown("---")
     # --- ส่วนที่ 1: ประเภทของโรคเบาหวาน (อัปเดต 4 ชนิด) ---

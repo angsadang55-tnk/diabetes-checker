@@ -8,6 +8,12 @@ import pandas as pd
 from datetime import datetime
 import plotly.express as px
 
+# แก้ไขตรงส่วน st.set_page_config
+st.set_page_config(
+    page_title="GlycoGauge - ระบบวิเคราะห์ความเสี่ยงเบาหวาน",
+    page_icon="🩸",
+    layout="wide"
+)
 #2. ฟังก์ชันประเมินระดับความเสี่ยง
 def get_risk_status(glucose, prediction):
     if prediction == "เสี่ยง" and glucose >= 126: 

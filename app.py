@@ -209,71 +209,103 @@ def save_result(result_text, user_input):
         # ⏰ เวลา
         "datetime": datetime.now()
     })
-#10. ระบบสมัครสมาชิกและเข้าสู่ระบบ
+# #10. ระบบสมัครสมาชิกและเข้าสู่ระบบ
 def auth_page():
-    from firebase_auth import firebase_login
+    inject_custom_css()
+    
+    # ดึงฟังก์ชันมาจากภายนอก (ตามโครงสร้างเดิมของคุณ)
+    from firebase_auth import firebase_login 
 
     if "auth_mode" not in st.session_state:
         st.session_state.auth_mode = "login"
 
-    if st.session_state.auth_mode == "login":
-        st.subheader("🔐 เข้าสู่ระบบ")
+    # --- ส่วนหัวและภาพลักษณ์แอป (ฝั่งซ้าย) ---
+    col1, col2 = st.columns([1.5, 1], gap="large")
 
-        email = st.text_input("อีเมล", key="login_email")
-        password = st.text_input("รหัสผ่าน", type="password", key="login_pass")
+    with col1:
+        st.markdown(f"""
+            <div style="padding: 20px; border-left: 5px solid #1e3c72; background-color: #f0f4fa; border-radius: 10px; margin-top: 50px;">
+                <h1 style='color: #1e3c72; font-size: 3rem; margin-bottom: 0;'>GlycoGauge 🩸</h1>
+                <h3 style='color: #2a5298; margin-top: 0;'>ระบบวิเคราะห์ความเสี่ยงเบาหวานอัจฉริยะ</h3>
+                <p style='font-size: 1.1rem; color: #444; line-height: 1.6;'>
+                    เริ่มต้นดูแลสุขภาพของคุณวันนี้ ด้วยระบบวิเคราะห์ข้อมูลสุขภาพที่แม่นยำ 
+                    ใช้งานง่าย และได้รับมาตรฐานความปลอดภัยระดับสูง
+                </p>
+                <ul style='color: #555; font-size: 1rem;'>
+                    <li>วิเคราะห์ผลน้ำตาลในเลือดทันที</li>
+                    <li>เก็บประวัติสุขภาพย้อนหลังได้ไม่จำกัด</li>
+                    <li>ข้อมูลส่วนตัวของคุณจะถูกเก็บเป็นความลับ</li>
+                </ul>
+            </div>
+        """, unsafe_allow_html=True)
+        st.info("💡 เคล็ดลับ: การตรวจสอบระดับน้ำตาลเป็นประจำ ช่วยลดความเสี่ยงโรคแทรกซ้อนได้")
 
-        if st.button("เข้าสู่ระบบ"):
-            if not email or not password:
-                st.error("กรุณากรอกอีเมลและรหัสผ่าน")
-                return
+    # --- ส่วนแบบฟอร์ม (ฝั่งขวา) ---
+    with col2:
+        st.markdown("<div style='margin-top: 50px;'></div>", unsafe_allow_html=True) # เว้นระยะข้างบน
+        
+        if st.session_state.auth_mode == "login":
+            st.markdown("""
+                <div style="background-color: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border: 1px solid #eee;">
+                    <h2 style='text-align: center; color: #1e3c72;'>🔐 เข้าสู่ระบบ</h2>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            email = st.text_input("อีเมล", key="login_email", placeholder="example@email.com")
+            password = st.text_input("รหัสผ่าน", type="password", key="login_pass", placeholder="••••••••")
 
-            result = firebase_login(email, password)
+            if st.button("เข้าสู่ระบบ 🚀", use_container_width=True, type="primary"):
+                if not email or not password:
+                    st.error("กรุณากรอกอีเมลและรหัสผ่าน")
+                else:
+                    with st.spinner("กำลังเข้าสู่ระบบ..."):
+                        result = firebase_login(email, password)
+                        if "idToken" in result:
+                            st.session_state.logged_in = True
+                            st.session_state.user = email
+                            st.success("ยินดีต้อนรับกลับมา!")
+                            st.rerun()
+                        else:
+                            st.error(result.get("error", {}).get("message", "เข้าสู่ระบบไม่สำเร็จ"))
 
-            if "idToken" in result:
-                st.session_state.logged_in = True
-                st.session_state.user = email
+            st.markdown("<p style='text-align: center; color: #888; margin-top: 15px;'>ยังไม่มีบัญชีใช่ไหม?</p>", unsafe_allow_html=True)
+            if st.button("สมัครสมาชิกใหม่ ✨", use_container_width=True):
+                st.session_state.auth_mode = "register"
                 st.rerun()
-            else:
-                st.error(result.get("error", {}).get("message", "เข้าสู่ระบบไม่สำเร็จ"))
 
-        if st.button("ยังไม่มีบัญชี? สมัครสมาชิก"):
-            st.session_state.auth_mode = "register"
-            st.rerun()
+        else:
+            st.markdown("""
+                <div style="background-color: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border: 1px solid #eee;">
+                    <h2 style='text-align: center; color: #2a5298;'>📝 สมัครสมาชิก</h2>
+                </div>
+            """, unsafe_allow_html=True)
 
-    else:
-        st.subheader("📝 สมัครสมาชิก")
+            email = st.text_input("อีเมลใหม่", key="reg_email", placeholder="ตั้งค่าอีเมลของคุณ")
+            password = st.text_input("รหัสผ่านใหม่", type="password", key="reg_pass", placeholder="ตั้งรหัสผ่านอย่างน้อย 6 ตัว")
 
-        email = st.text_input("อีเมลใหม่", key="reg_email")
-        password = st.text_input("รหัสผ่านใหม่", type="password", key="reg_pass")
+            if st.button("ยืนยันการสมัครสมาชิก ✅", use_container_width=True, type="primary"):
+                if not email or not password:
+                    st.error("กรุณากรอกข้อมูลให้ครบ")
+                else:
+                    try:
+                        with st.spinner("กำลังลงทะเบียน..."):
+                            auth.create_user(email=email, password=password)
+                            db.collection("users").document(email).set({
+                                "email": email,
+                                "name": "",
+                                "role": "user",
+                                "created_at": datetime.now()
+                            })
+                            st.success("สมัครสมาชิกสำเร็จ! กรุณาเข้าสู่ระบบ")
+                            st.session_state.auth_mode = "login"
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"เกิดข้อผิดพลาด: {e}")
 
-        if st.button("สมัครสมาชิก"):
-            if not email or not password:
-                st.error("กรุณากรอกข้อมูลให้ครบ")
-                return
-
-        from firebase_admin import auth   # ← ต้องอยู่นอก try
-
-        try:
-            auth.create_user(email=email, password=password)
-
-            db.collection("users").document(email).set({
-                "email": email,
-                "name": "",
-                "role": "user",
-                "created_at": datetime.now()
-            })
-
-            st.success("สมัครสมาชิกสำเร็จ! กรุณาเข้าสู่ระบบ")
-            st.session_state.auth_mode = "login"
-            st.rerun()
-
-        except Exception as e:
-            st.error(f"เกิดข้อผิดพลาด: {e}")
-                    
-
-        if st.button("มีบัญชีแล้ว? กลับเข้าสู่ระบบ"):
-            st.session_state.auth_mode = "login"
-            st.rerun()
+            st.markdown("<p style='text-align: center; color: #888; margin-top: 15px;'>มีบัญชีอยู่แล้ว?</p>", unsafe_allow_html=True)
+            if st.button("กลับไปหน้าเข้าสู่ระบบ", use_container_width=True):
+                st.session_state.auth_mode = "login"
+                st.rerun() 
 #11. หน้า “วินิจฉัยและประเมินความเสี่ยง”
 def diabetes_page():
     render_styled_header("🩺 วินิจฉัยและประเมินความเสี่ยง", "วิเคราะห์สุขภาพด้วยระบบ AI จากพฤติกรรมและผลแล็บ")
